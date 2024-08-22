@@ -80,6 +80,8 @@ banchoClient.connect()
 
 // Chargement des données initiales
 let authorizedUsers = loadData('authorizedUsers.json', []);
+let verificationCodes = loadData('verificationCodes.json', {});
+let userOsuLinks = loadData('userOsuLinks.json', {});
 let pools = loadData('pools.json', {
     facile: { nm: [], hd: [], hr: [], dt: [], tb: [] },
     difficile: { nm: [], hd: [], hr: [], dt: [], tb: [] }
@@ -118,6 +120,72 @@ discordClient.on('messageCreate', message => {
             message.reply(`Utilisateurs autorisés: ${authorizedUsers.join(', ') || 'Aucun utilisateur autorisé.'}`);
         } else {
             message.reply('Commande invalide. Utilisez `!admin add [ID]`, `!admin remove [ID]`, ou `!admin list`.');
+        }
+    }
+});
+
+// Fonction pour générer un code de vérification aléatoire
+function generateVerificationCode() {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+// Gestion de la commande !verif add $pseudo
+discordClient.on('messageCreate', async message => {
+    if (message.channel.id === DISCORD_CHANNEL_ID && message.content.startsWith('!verif add')) {
+        const args = message.content.slice('!verif add'.length).trim();
+        const osuUsername = args
+
+        if (!osuUsername) {
+            message.reply('Erreur : Vous devez spécifier un pseudo osu!.\nExemple : `!verif add KIHCA`');
+            return;
+        }
+
+        if (verificationCodes[message.author.id] && !verificationCodes[message.author.id].verified) {
+            message.reply('Erreur : Vous êtes déjà vérifié. Vous ne pouvez pas demander une nouvelle vérification.');
+            return;
+        }
+
+        const verificationCode = generateVerificationCode();
+        verificationCodes[message.author.id] = { osuUsername, verificationCode };
+        saveData('verificationCodes.json', verificationCodes);
+
+        try {
+            // Envoi du message privé sur osu! via l'API bancho.js
+            const osuUser = await banchoClient.getUser(osuUsername);
+            if (osuUser) {
+                await osuUser.sendMessage(`Votre code de vérification pour lier votre compte osu! est : ${verificationCode}`);
+                console.log(`${verificationCode} ${osuUser}`);
+                message.reply('Code de vérification envoyé sur osu! en message privé.');
+            } else {
+                message.reply('Erreur : Impossible de trouver le joueur sur osu!. Vérifiez le pseudo.');
+            }
+        } catch (error) {
+            console.error('Erreur lors de l\'envoi du message privé sur osu!:', error);
+            message.reply('Erreur : Impossible d\'envoyer le message privé sur osu!. Veuillez réessayer plus tard.');
+        }
+    }
+});
+
+// Gestion de la commande !verif code $code
+discordClient.on('messageCreate', async message => {
+    if (message.channel.id === DISCORD_CHANNEL_ID && message.content.startsWith('!verif code')) {
+        const args = message.content.split(' ');
+        const code = args[2];
+
+        if (!code) {
+            message.reply('Erreur : Vous devez spécifier un code de vérification.\nExemple : `!verif code 123456`');
+            return;
+        }
+
+        const userVerification = verificationCodes[message.author.id];
+        if (userVerification && userVerification.verificationCode === code) {
+            userOsuLinks[message.author.id] = userVerification.osuUsername;
+            saveData('userOsuLinks.json', userOsuLinks);
+            delete verificationCodes[message.author.id];
+            saveData('verificationCodes.json', verificationCodes);
+            message.reply(`Votre compte osu! (${userVerification.osuUsername}) a été lié avec succès.`);
+        } else {
+            message.reply('Erreur : Code de vérification incorrect ou expiré.');
         }
     }
 });
@@ -179,13 +247,21 @@ discordClient.on('messageCreate', async message => {
 discordClient.on('messageCreate', async message => {
     if (message.channel.id === DISCORD_CHANNEL_ID && message.content.startsWith('!tryouts')) {
         const args = message.content.split(' ');
-        const playerName = args[1];
-        const difficulty = args[2];
+        let playerName = args[1];
+        const difficulty = args[2] || args[1];
 
-        if (!playerName || !difficulty || !pools[difficulty]) {
-            message.reply('Erreur : commande incorrecte. Utilisez `!tryouts [pseudo] [difficulté]`.\n' +
-                'Exemple : `!tryouts KIHCA facile`');
+        if (!difficulty || !pools[difficulty]) {
+            message.reply('Erreur : commande incorrecte. Utilisez `!tryouts [difficulté]` si votre compte est lié ou `!tryouts [pseudo] [difficulté]`.\n' +
+                'Exemple : `!tryouts facile` ou `!tryouts KIHCA facile`');
             return;
+        }
+
+        if (!playerName || pools[difficulty]) {
+            playerName = userOsuLinks[message.author.id];
+            if (!playerName) {
+                message.reply('Erreur : Vous devez d\'abord lier votre compte osu! en utilisant `!verif add [pseudo]`.');
+                return;
+            }
         }
 
         try {
@@ -193,7 +269,7 @@ discordClient.on('messageCreate', async message => {
             message.reply(`Lobby créé : ${lobbyLink}`);
         } catch (error) {
             console.error(error);
-            message.reply(error);
+            message.reply('Erreur lors de la création du lobby ou de l\'invitation du joueur.');
         }
     }
 });
@@ -239,7 +315,6 @@ async function createLobbyAndInvitePlayer(playerName, difficulty, author) {
 
         const password = generateRandomPassword();
         await lobbyChannel.sendMessage(`!mp password ${password}`);
-        await lobbyChannel.sendMessage(`!mp addref ${playerName}`);
         await lobbyChannel.sendMessage(`!mp set 0 3 16`);
         await lobbyChannel.sendMessage(`!mp invite ${playerName}`);
         await author.send(`Le lobby pour ${playerName} (${difficulty}) a été créé.\nMot de passe : ${password}\nLien du lobby : ${lobbyLink}`);
@@ -306,5 +381,7 @@ async function createLobbyAndInvitePlayer(playerName, difficulty, author) {
     }
 }
 
+// Connexion du bot Discord
+discordClient.login(DISCORD_TOKEN);
 // Connexion du bot Discord
 discordClient.login(DISCORD_TOKEN);
