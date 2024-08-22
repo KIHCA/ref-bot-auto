@@ -32,8 +32,8 @@ function loadData(filename, defaultValue) {
 // Fonction pour ajouter un lien à Google Sheets
 async function addLinkToSheet(lobbyLink) {
     const sheets = google.sheets({ version: 'v4', auth: oAuth2Client });
-    const spreadsheetId = '1wucDIhWx38HBKD-wYVdBzCMEPEIAPQDvuNQZbdInVPs';
-    const range = 'Match Links/IDs!A2:A';
+    const spreadsheetId = 'ptdr';
+    const range = 'ptdr';
 
     const request = {
         spreadsheetId,
